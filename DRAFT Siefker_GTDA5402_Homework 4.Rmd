@@ -1,0 +1,112 @@
+---
+title: "Homework 4"
+author: "Lisa Siefker"
+date: "2025-02-05"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Q1: Project 1D: Forest Ecology Data
+
+```{r}
+#read data from .txt file
+data = read.table("forest_frequency_t.txt", header = TRUE)
+
+#convert first column to row names
+rownames(data) <- data[[1]]
+data <- data[-1]
+```
+
+Q2: Provide at least one graphical and numerical summary for the variables of interest. 
+
+```{r}
+#convert character numbers to numeric data
+data1 <- data %>%
+  mutate(across(everything(), as.numeric))
+
+#check for NAs
+any(is.na(data1))
+```
+
+
+```{r}
+#Add column with Species_Total for each species 
+data2 <- data1%>%
+  mutate(Species_Total= rowSums(select(., everything())))
+
+#Add a row with Plot_Total for each plot  
+data2 <- data2%>%  
+  bind_rows(summarise_all(data2, sum))
+#Add row name for the Total row
+rownames(data2)[nrow(data2)] <- "Plot_Total"
+
+#
+
+```
+
+
+```{r}
+#subset the data to consider the species of interest (rows 6 - 28) 
+data_subset <- data2[6:28, ]
+
+# Calculate Species_Total for the subset
+data_subset$Species_Total <- rowSums(data_subset)
+
+# Create a bar graph of Species_Total for subset
+ggplot(data_subset, aes(x = rownames(data_subset), y = Species_Total)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  xlab("Species") +
+  ylab("Species Total") +
+  ggtitle("Total Counts per Species") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+
+```
+
+```{r}
+# Add columns for mean, SD, var, min, and max of trees per plot for each species
+data_sub_stats <- data_subset %>%
+  mutate(
+    Mean = rowMeans(data_subset[, 1:(ncol(data_subset) - 1)]),
+    Std_Dev = apply(data_subset[, 1:(ncol(data_subset) - 1)], 1, sd),
+    Variance = apply(data_subset[, 1:(ncol(data_subset) - 1)], 1, var),
+    Min = apply(data_subset[, 1:(ncol(data_subset) - 1)], 1, min),
+    Max = apply(data_subset[, 1:(ncol(data_subset) - 1)], 1, max)
+  )
+
+# Print the stats for the data subset from highest to lowest mean 
+print(data_sub_stats[, (ncol(data_sub_stats) - 5):ncol(data_sub_stats)])%>%
+  arrange(desc(Mean))
+
+
+```
+
+```{r}
+#calculate plot totals, excluding species total in last col
+plot_totals <- colSums(data_subset[,-ncol(data_subset)])
+
+# Convert to data frame 
+plot_totals_df <- data.frame(Plot_Totals = plot_totals)
+
+print(any(is.na(plot_totals_df)))
+
+```
+
+```{r}
+# Create histogram of plot totals
+ggplot(plot_totals_df, aes(x = Plot_Totals)) +
+  geom_histogram(binwidth = 1, color = "black", fill = "skyblue", alpha = 0.7) +
+  labs(title = "Histogram of Plot Totals",
+       x = "Total Number of Trees per Plot",
+       y = "Frequency") +
+  scale_x_continuous(limits = c(min(plot_totals), max(plot_totals) + 5)) +
+  scale_y_continuous(limits = c(0, NA)) + 
+  theme_minimal()
+
+any(is.infinite(plot_totals))
+```
+
