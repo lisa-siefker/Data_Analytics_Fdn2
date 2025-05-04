@@ -1,0 +1,589 @@
+---
+title: GTDA 5402 Homework 4
+author: "Lisa Siefker"
+date: "2025-02-05"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+```
+
+
+
+```{r}
+#read data from .txt file
+data = read.table("forest_frequency_t.txt", header = TRUE)
+
+#convert first column to row names
+rownames(data) <- data[[1]]
+data <- data[,-1]
+
+#convert character numbers to numeric data
+data_1 <- data %>%
+  mutate(across(everything(), as.numeric))
+
+#check for NAs
+sum(is.na(data_1))
+```
+```{r}
+#subset the data to consider the species of interest (rows 6 - 28) 
+data_subset <- data_1[6:28, ]
+
+```
+
+```{r}
+# Calculate Species_Total for the subset
+data_subset_stats <- data_subset 
+
+data_subset_stats <- data_subset_stats %>%
+  mutate(
+    Species_Total = rowSums(., na.rm = TRUE),
+    Sample_Mean = rowMeans(data_subset_stats[, 1:67]),
+    Std_Dev = apply(data_subset_stats[, 1:67], 1, sd),
+    Variance = apply(data_subset_stats[, 1:67], 1, var),
+    Min = apply(data_subset_stats[, 1:67], 1, min),
+    Max = apply(data_subset_stats[, 1:67], 1, max)
+  )
+
+# Print the stats for the data subset from highest to lowest mean 
+print(data_subset_stats[, (ncol(data_subset_stats) - 5):ncol(data_subset_stats)])%>%
+  arrange(desc(Sample_Mean))
+
+```
+
+```{r}
+#Add species name as a column
+data_subset_stats <- data_subset_stats%>%
+  mutate(Species = rownames(data_subset_stats))
+
+#Calculate Poisson probabilities for each species
+data_subset_pois <- data_subset_stats %>%
+  rowwise()%>%
+  mutate(
+    Poisson_Probs = list(dpois(0:Max, lambda = Sample_Mean))
+  ) %>%
+  ungroup()
+
+data_subset_pois %>%
+  select(Species, Species_Total, Sample_Mean, Poisson_Probs)%>%
+  arrange(desc(Sample_Mean))%>%
+  print()
+
+```
+
+```{r}
+
+library(purrr)
+
+data_pois <- data_subset_pois %>%
+  select(Species, Sample_Mean, Poisson_Probs) %>%
+  mutate(Poisson_Probs = map_chr(Poisson_Probs, ~ paste(round(.x, 4), collapse = ", ")))
+
+print(data_pois, n = Inf)  
+```
+
+```{r}
+library(purrr)
+
+data_pois <- data_subset_pois %>%
+  select(Species, Sample_Mean, Poisson_Probs) %>%
+  mutate(
+    # Compute standard error
+    SE = sqrt(Sample_Mean) / sqrt(n()),  
+    
+    # Compute confidence interval
+    CI_Lower = Sample_Mean - 1.96 * SE,
+    CI_Upper = Sample_Mean + 1.96 * SE,
+    
+    # Format confidence interval as a string
+    CI_95 = paste0("(", round(CI_Lower, 4), ", ", round(CI_Upper, 4), ")")
+  ) %>%
+  select(Species, Sample_Mean, Poisson_Probs, CI_95)
+
+print(data_pois, n = Inf)
+```
+
+```{r}
+
+data_pois <- data_subset_pois %>%
+  select(Species, Sample_Mean, Std_Dev, Poisson_Probs) %>%
+  mutate(
+    # Compute standard error
+    SE = sqrt(Sample_Mean) / sqrt(n()),  
+    
+    # Compute confidence interval
+    CI_Lower = Sample_Mean - 1.96 * SE,
+    CI_Upper = Sample_Mean + 1.96 * SE
+  ) %>%
+  mutate(
+    # Compute the range of the confidence interval
+    CI_Range = CI_Upper - CI_Lower,
+    
+    # Format confidence interval as a string
+    CI_95 = paste0("(", round(CI_Lower, 4), ", ", round(CI_Upper, 4), ")")
+  ) %>%
+  select(Species, Sample_Mean, Std_Dev, Poisson_Probs, CI_95, CI_Range) %>%
+  
+  # Arrange by CI_Range in descending order
+  arrange(desc(CI_Range))
+
+print(data_pois, n = Inf)
+
+```
+
+
+```{r}
+#view Poisson probs
+data_subset_pois$Poisson_Probs[1:5]
+```
+
+```{r}
+# Create a bar graph of Species_Total for subset
+ggplot(data_subset_stats, aes(x = rownames(data_subset), y = Species_Total)) +
+  geom_bar(stat = "identity", fill = "darkgreen") +
+  xlab("Species") +
+  ylab("Species Total") +
+  ggtitle("Total Counts per Species") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+
+```{r}
+#create a stacked bar plot showing frequency of each species
+# Convert row names to a column (Species)
+data_subset$Species <- rownames(data_subset)
+
+#Reshape data to long format for ggplot (each row is a species in a plot)
+data_long <- data_subset %>%
+  gather(key = "Plot", value = "Tree_Count", -Species)  # Exclude 'Species' when reshaping
+
+#Create stacked bar plot
+ggplot(data_long, aes(x = Plot, y = Tree_Count, fill = Species)) +
+  geom_bar(stat = "identity") +
+  labs(title = "Tree Species Frequency by Plot", 
+       x = "Plot", 
+       y = "Number of Trees") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 8))  
+```
+```{r}
+library(reshape2)
+
+# Create heatmap
+ggplot(data_long, aes(x = Plot, y = Species, fill = Tree_Count)) +
+  geom_tile() +
+  scale_fill_gradient(low = "white", high = "darkgreen") +  # Change color scale as needed
+  labs(title = "Tree Species Frequency Heatmap by Plot", 
+       x = "Plot", 
+       y = "Species") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+
+```{r}
+# Extract the row for C.ovata as a numeric vector
+c_ovata_counts <- as.numeric(data_subset["C.ovata", (1:67)])
+
+# Ensure missing values (NA) are replaced with 0
+c_ovata_counts[is.na(c_ovata_counts)] <- 0
+
+# Define breaks starting from 0
+hist(
+  c_ovata_counts,
+  breaks = seq(0, max(c_ovata_counts, na.rm = TRUE) + 0.5, by = 1), 
+  main = "Histogram of C.ovata Counts Across Plots",
+  xlab = "Number of Trees per Plot",
+  ylab = "Frequency",
+  col = "forestgreen",
+  border = "black"
+)
+```
+
+```{r}
+#visualize Poisson probabilities for C.ovata
+c_ovata_probs <- data_subset_pois%>%
+  filter(Species == "C.ovata")%>%
+  pull(Poisson_Probs)%>%
+  unlist()
+
+#create a data frame for plotting
+covata_df_poisson <- data.frame(
+  Count = 0:(length(c_ovata_probs) - 1),
+  Probability = c_ovata_probs * sum(c_ovata_probs)
+)
+
+# Plot the Poisson probability mass function (PMF)
+ggplot(covata_df_poisson, aes(x = Count, y = Probability)) +
+  geom_bar(stat = "identity", fill = "blue", alpha = 0.7) +
+  theme_minimal() +
+  labs(
+    title = "Poisson Probabilities for C.ovata",
+    x = "Number of Trees per Plot",
+    y = "Probability"
+  ) +
+  theme(panel.grid.major = element_line(color = "gray", linetype = "dotted"))
+```
+
+
+```{r}
+#Visualize observed counts with Poisson probabilities
+#create a frequency table of observed counts
+c_ovata_obs_freq <- as.data.frame(table(c_ovata_counts))
+#set column names
+colnames(c_ovata_obs_freq) <- c("Count", "Obs_Frequency") 
+#convert data type from factor to numeric
+c_ovata_obs_freq$Count <- as.numeric(as.character(c_ovata_obs_freq$Count))
+
+#Extract Poisson probabilities for C.ovata
+c_ovata_probs <- data_subset_pois%>%
+  filter(Species == "C.ovata")%>%
+  pull(Poisson_Probs)%>%
+  unlist()
+
+#create a data frame of Poisson probabilities for plotting
+covata_df_poisson <- data.frame(
+  Count = 0:(length(c_ovata_probs) - 1),
+  Probability = c_ovata_probs * sum(c_ovata_obs_freq$Obs_Frequency)
+)
+
+#merge observed frequencies into Poisson probability dataframe
+c_ovata_merge_df <- merge(covata_df_poisson, c_ovata_obs_freq, by="Count", all.x = TRUE)
+#replace NA with 0
+c_ovata_merge_df$Obs_Frequency[is.na(c_ovata_merge_df$Obs_Frequency)] <- 0  
+
+#check for NAs
+#colSums(is.na(c_ovata_merge_df))
+
+ggplot(c_ovata_merge_df, aes(x = Count))+
+  geom_bar(aes(y=Probability), stat = "identity", fill = "blue", alpha = 0.6, width = 0.8) +
+  geom_point(aes(y = Obs_Frequency), color = "red", size = 3)+
+  geom_line(aes(y=Obs_Frequency), color = "red", size = 1)+
+  theme_minimal()+
+  labs(
+    title = "Poisson Fit vs. Observed Counts for C.ovata", 
+    x = "Number of Trees per Plot",
+    y = "Frequency"
+  ) + 
+  theme(panel.grid.major = element_line(color = "gray", linetype = "dotted"))
+
+
+```
+```{r}
+
+# Extract the row for C.cordiformis as a numeric vector
+c_cordiformis_counts <- as.numeric(data_subset["C.cordiformis", (1:67)])
+
+# Ensure missing values (NA) are replaced with 0
+c_cordiformis_counts[is.na(c_cordiformis_counts)] <- 0
+
+# Define breaks starting from 0
+hist(
+  c_cordiformis_counts,
+  breaks = seq(0, max(c_cordiformis_counts, na.rm = TRUE) + 0.5, by = 1), 
+  main = "Histogram of C.cordiformis Counts Across Plots",
+  xlab = "Number of Trees per Plot",
+  ylab = "Frequency",
+  col = "forestgreen",
+  border = "black"
+)
+
+#visualize Poisson probabilities for C.cordiformis
+c_cordiformis_probs <- data_subset_pois%>%
+  filter(Species == "C.cordiformis")%>%
+  pull(Poisson_Probs)%>%
+  unlist()
+
+#create a data frame for plotting
+cordiformis_df_poisson <- data.frame(
+  Count = 0:(length(c_cordiformis_probs) - 1),
+  Probability = c_cordiformis_probs * sum(c_cordiformis_probs)
+)
+
+#Visualize observed counts with Poisson probabilities
+#create a frequency table of observed counts
+c_cordiformis_obs_freq <- as.data.frame(table(c_cordiformis_counts))
+#set column names
+colnames(c_cordiformis_obs_freq) <- c("Count", "Obs_Frequency") 
+#convert data type from factor to numeric
+c_cordiformis_obs_freq$Count <- as.numeric(as.character(c_cordiformis_obs_freq$Count))
+
+#Extract Poisson probabilities for C.cordiformis
+c_cordiformis_probs <- data_subset_pois%>%
+  filter(Species == "C.cordiformis")%>%
+  pull(Poisson_Probs)%>%
+  unlist()
+
+#create a data frame of Poisson probabilities for plotting
+cordiformis_df_poisson <- data.frame(
+  Count = 0:(length(c_cordiformis_probs) - 1),
+  Probability = c_cordiformis_probs * sum(c_cordiformis_obs_freq$Obs_Frequency)
+)
+
+#merge observed frequencies into Poisson probability dataframe
+c_cordiformis_merge_df <- merge(cordiformis_df_poisson, c_cordiformis_obs_freq, by="Count", all.x = TRUE)
+#replace NA with 0
+c_cordiformis_merge_df$Obs_Frequency[is.na(c_cordiformis_merge_df$Obs_Frequency)] <- 0  
+
+#check for NAs
+#colSums(is.na(c_cordiformis_merge_df))
+
+ggplot(c_cordiformis_merge_df, aes(x = Count))+
+  geom_bar(aes(y=Probability), stat = "identity", fill = "blue", alpha = 0.6, width = 0.8) +
+  geom_point(aes(y = Obs_Frequency), color = "red", size = 3)+
+  geom_line(aes(y=Obs_Frequency), color = "red", size = 1)+
+  theme_minimal()+
+  labs(
+    title = "Poisson Fit vs. Observed Counts for C.cordiformis", 
+    x = "Number of Trees per Plot",
+    y = "Frequency"
+  ) + 
+  theme(panel.grid.major = element_line(color = "gray", linetype = "dotted"))
+
+```
+
+
+
+```{r}
+# Convert row names to a column 
+data_subset$Species <- rownames(data_subset)
+
+# Reshape data to long format 
+data_long <- data_subset %>%
+  pivot_longer(cols = -Species, names_to = "Plot", values_to = "Trees")
+
+# Convert Trees to factor to ensure 0 values are included
+data_long$Trees <- factor(data_long$Trees, levels = seq(0, max(data_long$Trees, na.rm = TRUE), by = 1))
+
+# Create faceted plot
+ggplot(data_long, aes(x = Trees)) +
+  geom_bar(fill = "forestgreen", color = "black") + 
+  labs(title = "Number of Trees per Plot for Each Species",
+       x = "Number of Trees",
+       y = "Frequency") +
+  facet_wrap(~Species, scales = "free_y") +  # Creates separate plots for each species
+  theme_minimal() +
+  theme(panel.grid.major = element_line(color = "gray", linetype = "dotted"),
+        axis.text.x = element_text(angle = 90, hjust = 1))  # Rotate x-axis labels for readability
+```
+
+```{r}
+#Sum totals for each plot 
+plot_totals <- colSums(data_subset[ , 1:67], na.rm = TRUE)
+
+#convert plot totals to df for ggplot
+df_plot_totals <- data.frame(Plot_Totals = plot_totals)
+
+#plot totals
+ggplot(df_plot_totals, aes(x = Plot_Totals)) +
+  geom_bar(fill = "forestgreen", color = "black") +
+  theme_minimal() +  
+  theme(
+    panel.grid.major = element_line(color = "gray", linetype = "dotted"),
+    panel.grid.minor = element_blank() 
+  ) +
+  labs(
+    title = "Plot Totals",
+    x = "Plot Totals)",
+    y = "Frequency"
+  )
+
+```
+```{r}
+sample_mean <- mean(df_plot_totals$Plot_Totals)
+print(sample_mean)
+
+sample_sd <- sd(df_plot_totals$Plot_Totals)
+print(sample_sd)
+
+sample_var <- sample_sd^2
+print(sample_var)
+```
+
+
+```{r}
+# Estimate Poisson parameter (lambda = mean of plot totals)
+lambda_hat <- mean(df_plot_totals$Plot_Totals)
+
+# Compute Poisson probabilities for possible values
+plot_range <- 0:max(df_plot_totals$Plot_Totals)  # Range of observed plot totals
+poisson_probs <- dpois(plot_range, lambda = lambda_hat) * length(plot_totals)  # Scale to dataset size
+
+# Create a data frame for Poisson expected values
+poisson_df <- data.frame(Plot_Totals = plot_range, Expected_Freq = poisson_probs)
+
+# Plot observed plot totals as a histogram
+ggplot(df_plot_totals, aes(x = Plot_Totals)) +
+  geom_bar(aes(y = after_stat(count)), fill = "forestgreen", color = "black", alpha = 0.6) +  # Observed data
+  geom_line(data = poisson_df, aes(x = Plot_Totals, y = Expected_Freq), color = "red", size = 1.2) +  # Poisson fit
+  theme_minimal() +  
+  theme(
+    panel.grid.major = element_line(color = "gray", linetype = "dotted"),
+    panel.grid.minor = element_blank() 
+  ) +
+  labs(
+    title = "Plot Totals with Poisson Fit",
+    x = "Plot Totals",
+    y = "Frequency"
+  )
+```
+
+
+
+```{r}
+#create faceted visualization of observed values v. Poisson probabilities for all species 
+
+#create function to generate Poisson probabilities and observed frequencies for each species
+get_poisson_data <- function(species_name, data_pois, data_stats) {
+  #extract observed counts for species 
+  species_counts <- as.numeric(data_subset %>%
+    filter(Species == species_name)%>%
+    select(-Species) %>% 
+    #convert to numeric vector
+    unlist())
+
+#create a frequency table of observed counts
+observed_freq <- as.data.frame(table(species_counts))
+colnames(observed_freq) <- c("Count", "Obs_Frequency") 
+#convert to numeric
+observed_freq$Count <- as.numeric(as.character(observed_freq$Count))
+
+#Extract Poisson probabilities for the species 
+species_probs <- data_subset_pois %>%
+  filter(Species == species_name)%>%
+  pull(Poisson_Probs)%>%
+  unlist()
+
+#Create a dataframe for Poisson probabilities
+df_poisson <- data.frame(
+  Count = 0:(length(species_probs)-1),
+  Probability = species_probs * sum(observed_freq$Obs_Frequency)
+)
+
+#Merge observed frequencies into Poisson probability dataframe
+merged_df <- merge(df_poisson, observed_freq, by = "Count", all.x = TRUE)
+#Replace NA with 0
+merged_df$Obs_Frequency[is.na(merged_df$Obs_Frequency)] <- 0
+#add species_name as a column
+merged_df$Species <- species_name
+
+return(merged_df)
+}
+
+#Generate Poisson fit data for all species
+poisson_data_all_species <- bind_rows(lapply(unique(data_subset_pois$Species), function(species) {
+  get_poisson_data(species, data_subset_pois, data_subset_stats)
+}))
+
+#faceted plot for all species 
+ggplot(poisson_data_all_species, aes(x = Count)) +
+  geom_bar(aes(y = Probability), stat = "identity", fill = "blue", alpha = 0.6, width = 0.8) + # Poisson probabilities
+  geom_point(aes(y = Obs_Frequency), color = "red", size = 2) +  # Observed counts
+  geom_line(aes(y = Obs_Frequency), color = "red", size = 0.8) +  # Observed trend
+  theme_minimal() +
+  facet_wrap(~ Species, scales = "free_y") +  # Create facets for each species
+  labs(
+    title = "Observed Counts v. Expected Poisson Values",
+    x = "Number of Trees per Plot",
+    y = "Frequency"
+  ) +
+  theme(panel.grid.major = element_line(color = "gray", linetype = "dotted"))
+
+```
+
+
+```{r}
+#Fit the binomial distribution to the data 
+
+data_sub<- subset(data_subset, select = -Species)
+
+# Define number of trials (plots)
+n_trials <- ncol(data_sub)
+
+# Function to fit binomial distribution
+fit_binomial <- function(species_row) {
+  # Number of successes (plots where species is present)
+  successes <- sum(species_row > 0)
+  
+  # Estimate probability of success (p_hat)
+  p_hat <- successes / n_trials
+  
+  # Compute expected frequencies using the binomial distribution
+  expected_freq <- dbinom(0:n_trials, size = n_trials, prob = p_hat) * n_trials
+  
+  # Return estimated probability and expected frequencies
+  return(list(p_hat = p_hat, expected_freq = expected_freq))
+}
+
+# Apply function to each species
+binomial_results <- apply(data_sub, 1, fit_binomial)
+
+
+```
+
+
+
+```{r}
+get_binomial_plot_data <- function(species_name, data_numeric, binomial_results, n_trials) {
+  # Ensure species row is correctly extracted
+  species_row <- as.numeric(data_numeric[species_name, ])  # Convert to numeric
+  
+  # Compute observed frequency table
+  observed_freq <- as.data.frame(table(factor(species_row, levels = 0:n_trials)))
+  colnames(observed_freq) <- c("Count", "Observed")
+  observed_freq$Count <- as.numeric(as.character(observed_freq$Count))  # Convert to numeric
+  
+  # Extract expected binomial frequencies
+  expected_freq <- binomial_results[[species_name]]$expected_freq  
+
+  # Create a data frame for plotting
+  plot_data <- merge(
+    observed_freq, 
+    data.frame(Count = 0:n_trials, Expected = expected_freq), 
+    by = "Count", 
+    all.x = TRUE
+  )
+
+  # Replace NA values in Expected column with 0
+  plot_data$Expected[is.na(plot_data$Expected)] <- 0
+  
+  # Add species name to the plot data
+  plot_data$Species <- species_name  
+
+  return(plot_data)
+}
+
+# Generate observed vs expected data for all species
+all_species_data <- bind_rows(lapply(rownames(data_sub), function(species) {
+  get_binomial_plot_data(species, data_sub, binomial_results, n_trials)
+}))
+
+# Create faceted plot for all species
+ggplot(all_species_data, aes(x = Count)) +
+  geom_bar(aes(y = Observed), stat = "identity", fill = "blue", alpha = 0.5) +  # Observed counts
+  geom_line(aes(y = Expected), color = "red", size = 1) +  # Expected binomial distribution
+  facet_wrap(~ Species, scales = "free_y") +  # Faceted plot for each species
+  labs(
+    title = "Observed Counts vs Expected Binomial Values",
+    x = "Number of Plots with Species",
+    y = "Frequency"
+  ) +
+  theme_minimal() +
+  theme(panel.grid.major = element_line(color = "gray", linetype = "dotted"))
+```
+
+```{r}
+print(max(df_plot_totals$Plot_Totals))
+
+print(min(df_plot_totals$Plot_Totals))
+      
+```
+
